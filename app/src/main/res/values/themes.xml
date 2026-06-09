@@ -1,0 +1,4 @@
+<resources>
+    <!-- Тема без ActionBar — используем Compose для UI -->
+    <style name="Theme.ScreenShotTest" parent="Theme.AppCompat.Light.NoActionBar" />
+</resources>
