@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  checks: write
+  contents: read
+
 jobs:
   screenshot-verify:
     name: Verify Screenshots
@@ -27,6 +31,15 @@ jobs:
 
       - name: Run screenshot verification
         run: ./gradlew testDebugUnitTest -Proborazzi.test.record=false -Proborazzi.test.verify=true
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Screenshot Test Results
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          reporter: java-junit
+          fail-on-error: false
 
       - name: Upload diff images on failure
         if: failure()

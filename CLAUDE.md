@@ -63,6 +63,12 @@ app/src/
 ./gradlew assembleDebug
 ```
 
+## GitHub Actions
+
+Два workflow:
+- `screenshot-tests.yml` — верификация при каждом PR, публикует результаты в Checks, загружает diff-артефакт при падении
+- `update-screenshots.yml` — ручной запуск (workflow_dispatch), перезаписывает эталоны на Linux и делает коммит; нужен когда разрабатываешь на macOS а CI на Linux
+
 ## Сценарий демо
 1. Показать PNG файлы в `app/src/test/screenshots/`
 2. Изменить `StatusOnline` в `Color.kt` с зелёного на другой цвет

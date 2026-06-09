@@ -16,46 +16,60 @@
 
 ---
 
-## Стек этого проекта
+## Стек и зачем каждый инструмент
 
-| Библиотека | Версия | Зачем |
+| Библиотека | Версия | Роль |
 |---|---|---|
-| Robolectric | 4.14.1 | Запускает Android-код на JVM, без эмулятора |
-| Roborazzi | 1.40.0 | Делает скриншоты и сравнивает с эталоном |
+| Robolectric | 4.14.1 | Эмулирует Android API на обычной JVM — без эмулятора |
+| Roborazzi | 1.40.0 | Делает скриншоты через Robolectric и сравнивает с эталоном |
 | AGP | 9.0.1 | Android Gradle Plugin |
 | Kotlin | 2.0.21 | Встроен в AGP 9, не подключается отдельно |
 
-**Ключевой момент:** тесты работают на обычном JVM (как unit-тесты), не требуют
-эмулятор или реальное устройство. Это делает их быстрыми и удобными для CI.
+**Ключевой момент:** тесты запускаются как обычные unit-тесты (`./gradlew testDebugUnitTest`),
+не требуют эмулятор или устройство. Это делает их быстрыми (~10 сек на 10 тестов)
+и надёжными в CI.
+
+### Как работает связка изнутри
+
+```
+JUnit запускает тест
+  └─> RobolectricTestRunner инициализирует Android-окружение на JVM
+        └─> @GraphicsMode(NATIVE) включает нативный Skia-рендер
+              └─> composeTestRule.setContent {} рендерит Compose в off-screen bitmap
+                    └─> captureRoboImage() сохраняет PNG или сравнивает с эталоном
+```
+
+Ключевая деталь: `@GraphicsMode(Mode.NATIVE)` переключает Robolectric с заглушки-рендерера
+на настоящий Skia (тот же движок, что в реальном Android). Без этой аннотации
+Compose рисует пустой белый прямоугольник.
 
 ---
 
-## Как повторить в своём проекте с нуля
+## Как подключить в свой проект
 
 ### Шаг 1 — Добавить зависимости
 
-В `gradle/libs.versions.toml` добавить версии:
+В `gradle/libs.versions.toml`:
 
 ```toml
 [versions]
-roborazzi = "1.40.0"
+roborazzi   = "1.40.0"
 robolectric = "4.14.1"
 
 [libraries]
-roborazzi             = { group = "io.github.takahirom.roborazzi", name = "roborazzi",             version.ref = "roborazzi" }
-roborazzi-compose     = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose",     version.ref = "roborazzi" }
-roborazzi-junit-rule  = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule",  version.ref = "roborazzi" }
-robolectric           = { group = "org.robolectric",               name = "robolectric",           version.ref = "robolectric" }
+roborazzi            = { group = "io.github.takahirom.roborazzi", name = "roborazzi",            version.ref = "roborazzi" }
+roborazzi-compose    = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose",    version.ref = "roborazzi" }
+roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
+robolectric          = { group = "org.robolectric",               name = "robolectric",          version.ref = "robolectric" }
 ```
 
-> Если не используешь версионный каталог — добавить напрямую в `dependencies {}`.
+> Без версионного каталога — указать зависимости напрямую в `dependencies {}` с явными версиями.
 
 ### Шаг 2 — Подключить в app/build.gradle.kts
 
 ```kotlin
 dependencies {
-    // уже есть в проекте:
-    testImplementation(libs.junit)
+    // уже есть в Compose-проекте:
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.androidx.compose.ui.test.junit4)
 
@@ -69,18 +83,16 @@ dependencies {
 
 ### Шаг 3 — Настроить testOptions
 
-В `android {}` блоке `app/build.gradle.kts` добавить:
+В блоке `android {}` файла `app/build.gradle.kts`:
 
 ```kotlin
 testOptions {
     unitTests {
-        // без этого Robolectric не найдёт ресурсы (drawable, strings и т.д.)
+        // Robolectric не найдёт ресурсы (strings, drawables) без этого
         isIncludeAndroidResources = true
 
         all { test ->
-            // roborazzi.test.record=true  → перезаписывает эталоны
-            // roborazzi.test.verify=true  → сравнивает с эталонами, падает при расхождении
-            // можно переключать флагами через -P при запуске gradle
+            // Переключение режима через Gradle-свойства (-P флаги)
             test.systemProperty(
                 "roborazzi.test.record",
                 project.findProperty("roborazzi.test.record") ?: "true"
@@ -94,296 +106,365 @@ testOptions {
 }
 ```
 
-По умолчанию (без флагов) тесты **записывают** эталоны. Это безопасно: при первом
-запуске все PNG создаются автоматически.
+По умолчанию (без `-P` флагов) тесты **записывают** эталоны. Безопасно:
+при первом запуске PNG создаются автоматически, тесты всегда проходят.
 
 ### Шаг 4 — Написать тест
 
-Создать файл в `app/src/test/java/.../screenshot/MyComponentScreenshotTest.kt`:
-
 ```kotlin
-package com.example.myapp.screenshot
-
-import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onRoot
-import com.github.takahirom.roborazzi.captureRoboImage
-import com.example.myapp.ui.components.MyButton
-import com.example.myapp.ui.theme.MyAppTheme
-import org.junit.Rule
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
-
-@RunWith(RobolectricTestRunner::class)      // запускаем через Robolectric (JVM)
-@GraphicsMode(GraphicsMode.Mode.NATIVE)     // NATIVE нужен для Compose-рендеринга
-@Config(sdk = [35])                          // версия Android SDK для симуляции
+@RunWith(RobolectricTestRunner::class)   // JUnit использует Robolectric вместо JVM
+@GraphicsMode(GraphicsMode.Mode.NATIVE)  // обязательно для Compose — включает Skia
+@Config(sdk = [35])                      // явно фиксируем версию Android для детерминизма
 class MyButtonScreenshotTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
 
     @Test
-    fun myButton_defaultState() {
-        // 1. Рендерим компонент
+    fun button_defaultState() {
         composeTestRule.setContent {
             MyAppTheme {
                 MyButton(text = "Click me")
             }
         }
-
-        // 2. Делаем скриншот и сохраняем/сравниваем
-        // Путь указывается относительно папки app/
+        // путь относительно папки app/
         composeTestRule.onRoot().captureRoboImage(
-            "src/test/screenshots/my_button_default.png"
+            "src/test/screenshots/button_default.png"
         )
     }
 }
 ```
 
-**Разбор аннотаций:**
-
-- `@RunWith(RobolectricTestRunner::class)` — говорит JUnit использовать Robolectric
-  вместо обычного JVM. Это позволяет вызывать Android API (View, Canvas и т.д.)
-- `@GraphicsMode(GraphicsMode.Mode.NATIVE)` — включает нативный рендеринг Skia.
-  Без него Compose не рисует правильно
-- `@Config(sdk = [35])` — какую версию Android эмулировать. Лучше указывать явно,
-  чтобы тесты были детерминированы на всех машинах
-
-### Шаг 5 — Создать папку для эталонов
-
-```
-app/src/test/screenshots/   ← сюда попадут PNG-файлы
-```
-
-Папку нужно создать вручную или она создастся автоматически при первом запуске.
-**Эти PNG нужно коммитить в git** — они и есть эталон.
-
-### Шаг 6 — Запустить первый раз (создать эталоны)
+### Шаг 5 — Создать папку для эталонов и записать первый раз
 
 ```bash
-./gradlew testDebugUnitTest
+mkdir -p app/src/test/screenshots
+
+./gradlew testDebugUnitTest   # записывает PNG
 ```
 
-После этого в `app/src/test/screenshots/` появятся PNG-файлы.
-Открой их, убедись что выглядят правильно, и сделай `git add`.
+Открой созданные PNG, убедись что выглядят правильно, и сделай `git add app/src/test/screenshots/`.
+**Эти PNG — часть кодовой базы, их нужно коммитить.**
 
 ---
 
 ## Режимы работы
 
-### Режим записи (по умолчанию)
+### Запись (по умолчанию)
 
 ```bash
 ./gradlew testDebugUnitTest
 ```
 
-Что происходит: тест рендерит компонент, сохраняет PNG в `src/test/screenshots/`.
-Если файл уже есть — перезаписывает его. Тест **всегда проходит**.
+Перезаписывает PNG в `app/src/test/screenshots/`. Тест всегда проходит.
+Используй после намеренного изменения дизайна.
 
-Когда использовать: после намеренного изменения UI (новый дизайн, новый цвет).
-
-### Режим верификации
+### Верификация
 
 ```bash
 ./gradlew testDebugUnitTest -Proborazzi.test.record=false -Proborazzi.test.verify=true
 ```
 
-Что происходит: тест рендерит компонент, сравнивает пиксели с PNG в
-`src/test/screenshots/`. Если есть отличия — тест **падает**.
+Сравнивает рендер с PNG-эталоном попиксельно. Если есть расхождение — тест падает.
+Используй в CI и перед коммитом.
 
-Когда использовать: перед коммитом, в CI/CD при PR.
-
-### Где смотреть результаты при падении
+### Где смотреть diff при падении
 
 ```
 app/build/outputs/roborazzi/
+├── profile_card_online_light_compare.png   ← эталон | diff | новый рендер
+├── profile_card_online_light_actual.png    ← что рендерит код сейчас
+└── ...
 ```
 
-Для каждого упавшего теста создаётся три файла:
-- `*_compare.png` — эталон слева, новый вариант справа, diff посередине
-- `*_actual.png` — что рендерит код сейчас
-- исходный эталон в `src/test/screenshots/`
+`_compare.png` — самый полезный файл: три картинки рядом. Сразу видно что изменилось.
 
 ---
 
-## Структура тестов в этом проекте
+## CI/CD: два workflow
+
+### Workflow 1 — верификация при каждом PR
+
+Файл: `.github/workflows/screenshot-tests.yml`
+
+Запускается автоматически когда открываешь или обновляешь PR в `main`.
+Прогоняет все тесты в режиме верификации.
 
 ```
-app/src/test/
-├── java/com/way/screenshottest/screenshot/
-│   ├── ProfileCardScreenshotTest.kt   (5 тестов)
-│   └── TaskItemScreenshotTest.kt      (5 тестов)
-└── screenshots/                        (10 PNG эталонов)
-    ├── profile_card_online_light.png
-    ├── profile_card_busy_light.png
-    ├── profile_card_offline_light.png
-    ├── profile_card_long_name.png
-    ├── profile_card_online_dark.png
-    ├── task_high_priority_pending.png
-    ├── task_done.png
-    ├── task_low_priority.png
-    ├── task_list_all_priorities.png
-    └── task_item_dark.png
+Открыл PR → GitHub Actions запустил ubuntu-latest → 
+  ./gradlew testDebugUnitTest -Proborazzi.test.verify=true →
+    Тест прошёл → PR можно мёрджить ✓
+    Тест упал  → Artifacts → screenshot-diffs → смотришь diff
 ```
 
-Каждый тест покрывает отдельное состояние компонента. Типичный набор:
-- светлая тема
-- тёмная тема
-- граничные данные (очень длинный текст, пустое поле)
-- разные состояния (активный/неактивный, ошибка/успех)
+На вкладке **Checks** в PR появляется список тестов с результатами (через `dorny/test-reporter`).
+При падении — артефакт `screenshot-diffs` хранится 7 дней.
+
+### Workflow 2 — перезапись эталонов на Linux
+
+Файл: `.github/workflows/update-screenshots.yml`
+
+Запускается **вручную**: GitHub → Actions → Update Screenshot Baselines → Run workflow.
+
+Зачем нужен: macOS и Linux по-разному рендерят некоторые шрифты и антиалиасинг.
+Если разрабатываешь на Mac а CI на Linux — после первого запуска тесты упадут из-за
+мелких пиксельных расхождений, хотя UI не изменился.
+
+Решение: один раз запусти этот workflow после добавления новых тестов. Он запишет
+эталоны прямо на Linux и сделает коммит в ту же ветку.
+
+```
+Actions → Update Screenshot Baselines → Run workflow (выбери ветку) →
+  Записывает PNG на ubuntu-latest →
+  git commit "chore: update screenshot baselines [skip ci]" →
+  Теперь верификационный workflow проходит ✓
+```
 
 ---
 
-## Сценарий демо
+## Интеграция в большой multi-module проект
+
+### Структура модулей
+
+В реальном проекте скриншот-тесты живут рядом с тестируемым кодом:
+
+```
+:core:design-system/
+  src/test/java/.../screenshot/
+    ButtonScreenshotTest.kt
+    ChipScreenshotTest.kt
+  src/test/screenshots/
+    button_primary_enabled.png
+    button_primary_disabled.png
+    chip_selected.png
+
+:feature:profile/
+  src/test/java/.../screenshot/
+    ProfileCardScreenshotTest.kt
+  src/test/screenshots/
+    profile_card_online.png
+    profile_card_offline.png
+
+:feature:feed/
+  src/test/java/.../screenshot/
+    FeedItemScreenshotTest.kt
+  src/test/screenshots/
+    feed_item_text.png
+    feed_item_image.png
+```
+
+### Gradle-конфигурация через convention plugin
+
+Чтобы не дублировать `testOptions {}` в каждом `build.gradle.kts`, создай
+convention plugin в `build-logic/`:
+
+```kotlin
+// build-logic/src/main/kotlin/screenshot-test-convention.gradle.kts
+android {
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { test ->
+                test.systemProperty(
+                    "roborazzi.test.record",
+                    project.findProperty("roborazzi.test.record") ?: "true"
+                )
+                test.systemProperty(
+                    "roborazzi.test.verify",
+                    project.findProperty("roborazzi.test.verify") ?: "false"
+                )
+            }
+        }
+    }
+}
+```
+
+Применяешь в каждом модуле одной строкой:
+```kotlin
+// feature/profile/build.gradle.kts
+plugins {
+    id("screenshot-test-convention")
+}
+```
+
+### Запуск тестов по всем модулям
+
+```bash
+# Верификация всех модулей сразу
+./gradlew testDebugUnitTest -Proborazzi.test.record=false -Proborazzi.test.verify=true
+
+# Только один модуль
+./gradlew :feature:profile:testDebugUnitTest -Proborazzi.test.verify=true
+
+# Параллельно (ускоряет в ~2x на 4-ядерной машине)
+./gradlew testDebugUnitTest --parallel -Proborazzi.test.verify=true
+```
+
+### Workflow для multi-module
+
+Верификационный workflow одинаковый — `./gradlew testDebugUnitTest` сам найдёт
+все модули. Единственное что меняется — пути к артефактам:
+
+```yaml
+- name: Upload diff images on failure
+  if: failure()
+  uses: actions/upload-artifact@v4
+  with:
+    name: screenshot-diffs
+    # ** захватывает вложенные модули
+    path: '**/build/outputs/roborazzi/'
+    retention-days: 7
+```
+
+И публикация результатов тестов:
+```yaml
+- name: Publish test results
+  uses: dorny/test-reporter@v1
+  if: always()
+  with:
+    name: Screenshot Test Results
+    path: '**/build/test-results/testDebugUnitTest/*.xml'
+    reporter: java-junit
+```
+
+---
+
+## Продвинутая настройка: RoborazziRule
+
+`RoborazziRule` даёт больше контроля чем прямой вызов `captureRoboImage`.
+
+### Порог допустимого расхождения
+
+Если шрифты на macOS и Linux слегка отличаются — можно задать допустимый процент
+отличающихся пикселей вместо перезаписи эталонов:
+
+```kotlin
+@get:Rule
+val roborazziRule = RoborazziRule(
+    options = RoborazziRule.Options(
+        roborazziOptions = RoborazziOptions(
+            compareOptions = RoborazziOptions.CompareOptions(
+                changeThreshold = 0.01f  // допускаем 1% отличающихся пикселей
+            )
+        )
+    )
+)
+```
+
+Используй с осторожностью: высокий порог маскирует реальные регрессии.
+
+### Автоматический захват для каждого теста
+
+```kotlin
+@get:Rule
+val roborazziRule = RoborazziRule(
+    captureRoot = composeTestRule.onRoot(),
+    options = RoborazziRule.Options(
+        captureType = RoborazziRule.CaptureType.LastImage(),
+        outputDirectoryPath = "src/test/screenshots"
+    )
+)
+
+@Test
+fun button_enabled() {
+    composeTestRule.setContent { MyButton(enabled = true) }
+    // скриншот сделается автоматически — имя файла = имя теста
+}
+```
+
+---
+
+## Naming convention для эталонов
+
+Рекомендуемый паттерн: `{компонент}_{состояние}_{вариант}.png`
+
+```
+button_primary_enabled_light.png
+button_primary_enabled_dark.png
+button_primary_disabled_light.png
+profile_card_online.png
+profile_card_offline_long_name.png
+feed_item_text_only.png
+feed_item_with_image.png
+```
+
+Правила:
+- всё в snake_case
+- состояние (enabled/disabled/loading/error) — обязательно
+- тема (light/dark) — если компонент по-разному выглядит в темах
+- нет смысла добавлять имя класса в имя файла — папка `screenshots/` уже это определяет
+
+---
+
+## Частые ошибки
+
+### Тест падает с NullPointerException или "No image found"
+
+Не стоит `isIncludeAndroidResources = true` в `testOptions`. Без него Robolectric
+не находит ресурсы (strings, drawables, темы).
+
+### Скриншоты белые или пустые
+
+Забыл `@GraphicsMode(GraphicsMode.Mode.NATIVE)`. Без неё Robolectric не включает
+нативный Skia — Compose рендерится в пустой холст.
+
+### На CI тест упал, локально всё ок
+
+Эталоны записаны на macOS, CI работает на Linux. Запусти `Update Screenshot Baselines`
+workflow (см. выше) — он перезапишет PNG прямо на ubuntu-latest.
+
+### Тест всегда проходит, не сравнивает
+
+Не прописаны `systemProperty` для `roborazzi.test.verify` в `testOptions`.
+Без явной передачи этого свойства Roborazzi видит `null` и по умолчанию
+работает в режиме записи.
+
+### Ошибка "Cannot add extension with name 'kotlin'" (AGP 9+)
+
+В AGP 9 Kotlin встроен внутрь. Не подключай `kotlin-android` плагин отдельно
+в `plugins {}` — только `android-application`/`android-library` и `kotlin-compose`.
+
+### Roborazzi Gradle Plugin не работает с AGP 9
+
+Плагин `io.github.takahirom.roborazzi` несовместим с AGP 9 (использует удалённый
+`TestedExtension`). Используй только библиотеки без плагина. Вместо задач
+`recordRoborazziDebug` / `verifyRoborazziDebug` — системные свойства через `testOptions`.
+
+---
+
+## Сценарий демо (показать на собеседовании/ревью)
 
 1. Открыть `app/src/test/screenshots/profile_card_online_light.png`
-2. Найти `StatusOnline` в `app/src/main/java/.../ui/theme/Color.kt`:
+2. Найти `StatusOnline` в `Color.kt`:
    ```kotlin
-   val StatusOnline = Color(0xFF4CAF50) // зелёный
+   val StatusOnline = Color(0xFF4CAF50)  // зелёный
    ```
 3. Изменить на красный:
    ```kotlin
-   val StatusOnline = Color(0xFFE53935) // красный
+   val StatusOnline = Color(0xFFE53935)
    ```
 4. Запустить верификацию:
    ```bash
    ./gradlew testDebugUnitTest -Proborazzi.test.record=false -Proborazzi.test.verify=true
    ```
-5. Тесты `profileCard_online_*` упадут. Открыть diff в
-   `app/build/outputs/roborazzi/` — видно что зелёный кружок стал красным
-6. Откатить изменение в `Color.kt` и запустить верификацию снова — всё зелено
+5. Тесты `profileCard_online_*` упадут. Открыть
+   `app/build/outputs/roborazzi/profile_card_online_light_compare.png` — видно
+   что зелёный кружок стал красным
+6. Откатить `Color.kt`, запустить верификацию снова — всё проходит
+
+Это и есть главная ценность: тест поймал **случайное** изменение цвета,
+которое легко пропустить на code review.
 
 ---
 
-## GitHub Actions: автозапуск при PR
+## Что покрывать скриншот-тестами
 
-Файл `.github/workflows/screenshot-tests.yml` уже создан в проекте.
+Скриншот-тесты дороги в поддержке: при каждом намеренном изменении дизайна
+нужно перезаписывать эталоны. Покрывай только важное:
 
-### Что происходит при создании PR
-
-1. GitHub запускает виртуальную машину Ubuntu
-2. Устанавливает JDK 17 и настраивает Gradle
-3. Запускает `./gradlew testDebugUnitTest` в режиме верификации
-4. Если тест упал — загружает diff-картинки как артефакт (кнопка **Artifacts**
-   на странице запуска в GitHub Actions)
-
-### Содержимое workflow-файла
-
-```yaml
-name: Screenshot Tests
-
-on:
-  pull_request:
-    branches: [ main, master ]   # запускается только при PR в main или master
-
-jobs:
-  screenshot-verify:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4          # скачать код из репозитория
-
-      - uses: actions/setup-java@v4        # установить JDK 17
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - uses: gradle/actions/setup-gradle@v3   # кешировать Gradle (ускоряет сборку)
-
-      - run: chmod +x ./gradlew            # сделать gradlew исполняемым (Linux)
-
-      - name: Run screenshot verification
-        run: ./gradlew testDebugUnitTest -Proborazzi.test.record=false -Proborazzi.test.verify=true
-
-      - name: Upload diffs on failure      # загружает артефакт только если тест упал
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshot-diffs
-          path: app/build/outputs/roborazzi/
-          retention-days: 7               # хранить 7 дней, потом удалить
-```
-
-### Как опубликовать проект на GitHub
-
-```bash
-# 1. Инициализировать git в папке проекта
-git init
-
-# 2. Добавить все файлы
-git add .
-
-# 3. Первый коммит (PNG-эталоны должны войти в коммит!)
-git commit -m "Initial commit with screenshot tests"
-
-# 4. Создать репозиторий на github.com (через сайт или gh cli):
-gh repo create my-project --public --source=. --push
-
-# ИЛИ вручную:
-git remote add origin https://github.com/<username>/<repo>.git
-git branch -M main
-git push -u origin main
-```
-
-После этого создай любую ветку, измени что-нибудь, открой PR — Actions запустится
-автоматически.
-
----
-
-## Частые ошибки и как их исправить
-
-### Тест падает с "No image found" или NullPointerException
-
-Скорее всего не стоит `isIncludeAndroidResources = true` в `testOptions`.
-Добавь в `build.gradle.kts`:
-```kotlin
-testOptions {
-    unitTests {
-        isIncludeAndroidResources = true
-    }
-}
-```
-
-### Скриншоты выглядят пустыми / всё белое
-
-Забыл `@GraphicsMode(GraphicsMode.Mode.NATIVE)`. Эта аннотация обязательна
-для Compose — без неё рендеринг не работает.
-
-### Тест всегда проходит, эталон не обновляется
-
-Проверь что systemProperty для `roborazzi.test.record` и `roborazzi.test.verify`
-прописаны в `testOptions`. Без них Roborazzi игнорирует флаги.
-
-### На CI тест упал, хотя локально всё ок
-
-Шрифты на Linux и macOS различаются — это нормально. Решения:
-- Принять расхождение и обновить эталоны на Linux: запустить
-  `./gradlew testDebugUnitTest` в GitHub Actions с режимом записи, скачать артефакт
-- Использовать `RoborazziRule` с настройкой порога допустимого расхождения
-
-### Ошибка "Cannot add extension with name 'kotlin'" (AGP 9+)
-
-В AGP 9 Kotlin встроен внутрь. Не подключай плагин `kotlin-android` отдельно
-в `plugins {}`. Только `android-application` и `kotlin-compose`.
-
-### Roborazzi Gradle Plugin не работает с AGP 9
-
-Плагин `io.github.takahirom.roborazzi` версии 1.40.0 несовместим с AGP 9.
-Используй только библиотеки (как в этом проекте), без плагина.
-Вместо задач `recordRoborazziDebug` / `verifyRoborazziDebug` — системные свойства
-через `testOptions`.
-
----
-
-## Совет: что покрывать скриншот-тестами
-
-Скриншот-тесты дороги в поддержке (при каждом намеренном изменении дизайна
-надо обновлять эталоны). Покрывай только то, что действительно важно:
-
-- **Да:** ключевые компоненты (карточки, кнопки, формы)
-- **Да:** состояния с разными данными (пустой/заполненный, ошибка/успех)
-- **Да:** светлая и тёмная тема, если поддерживается
-- **Нет:** внутренние helper-функции, которые не рендерятся напрямую
-- **Нет:** анимации (скриншот делается в статике)
+| Покрывать | Не покрывать |
+|---|---|
+| Ключевые UI-компоненты (карточки, кнопки, формы) | Внутренние helper-функции |
+| Все видимые состояния (loading, error, empty, filled) | Анимации (снимок статичен) |
+| Светлая и тёмная тема | Компоненты без визуального вывода |
+| Граничные данные (очень длинный текст, 0 элементов) | Дублирующиеся состояния |
