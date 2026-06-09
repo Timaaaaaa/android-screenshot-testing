@@ -1,3 +1,4 @@
+// Screenshot tests for TaskItem component
 package com.way.screenshottest.screenshot
 
 import androidx.compose.foundation.layout.Arrangement
