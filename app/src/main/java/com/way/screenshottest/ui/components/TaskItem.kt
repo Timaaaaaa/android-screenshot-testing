@@ -27,6 +27,7 @@ import com.way.screenshottest.ui.theme.PriorityHigh
 import com.way.screenshottest.ui.theme.PriorityLow
 import com.way.screenshottest.ui.theme.PriorityMedium
 import com.way.screenshottest.ui.theme.ScreenShotTestTheme
+import com.way.screenshottest.ui.theme.StatusOnline
 
 enum class Priority { High, Medium, Low }
 
@@ -95,7 +96,7 @@ private fun PriorityBadge(priority: Priority) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = StatusOnline,
         )
     }
 }
