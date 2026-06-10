@@ -41,6 +41,43 @@ jobs:
           reporter: java-junit
           fail-on-error: false
 
+      - name: Generate screenshot summary
+        if: always()
+        run: |
+          SUMMARY=$GITHUB_STEP_SUMMARY
+          ROBORAZZI_DIR="app/build/outputs/roborazzi"
+
+          echo "## Screenshot Test Results" >> $SUMMARY
+          echo "" >> $SUMMARY
+
+          # Count results from JUnit XML
+          XML_DIR="app/build/test-results/testDebugUnitTest"
+          if [ -d "$XML_DIR" ]; then
+            TOTAL=$(grep -h 'testcase' $XML_DIR/*.xml 2>/dev/null | wc -l | tr -d ' ')
+            FAILED=$(grep -h '<failure' $XML_DIR/*.xml 2>/dev/null | wc -l | tr -d ' ')
+            PASSED=$((TOTAL - FAILED))
+            if [ "$FAILED" -gt "0" ]; then
+              echo "❌ **$FAILED failed**, ✅ $PASSED passed (total: $TOTAL)" >> $SUMMARY
+            else
+              echo "✅ All $TOTAL tests passed" >> $SUMMARY
+            fi
+          fi
+
+          # Show diff images if any
+          DIFF_IMAGES=$(find "$ROBORAZZI_DIR" -name "*_compare.png" 2>/dev/null | sort)
+          if [ -n "$DIFF_IMAGES" ]; then
+            echo "" >> $SUMMARY
+            echo "### Diffs" >> $SUMMARY
+            echo "" >> $SUMMARY
+            echo "| Test | Expected → Actual |" >> $SUMMARY
+            echo "|------|-------------------|" >> $SUMMARY
+            for img in $DIFF_IMAGES; do
+              name=$(basename "$img" "_compare.png")
+              b64=$(base64 -w 0 "$img")
+              echo "| \`$name\` | ![diff](data:image/png;base64,$b64) |" >> $SUMMARY
+            done
+          fi
+
       - name: Upload diff images on failure
         if: failure()
         uses: actions/upload-artifact@v4

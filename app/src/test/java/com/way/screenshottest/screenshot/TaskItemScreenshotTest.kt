@@ -28,7 +28,6 @@ class TaskItemScreenshotTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    // Тест 1: Задача с высоким приоритетом — не выполнена
     @Test
     fun taskItem_highPriority_pending() {
         composeTestRule.setContent {

@@ -10,7 +10,7 @@ val Purple40 = Color(0xFF6650A4)
 val PurpleGrey40 = Color(0xFF625B71)
 val Pink40 = Color(0xFF7D5260)
 
-val StatusOnline = Color(0xFF1F211F)
+val StatusOnline = Color(0xFFE53935)
 val StatusBusy = Color(0xFFFF9800)
 val StatusOffline = Color(0xFF9E9E9E)
 
