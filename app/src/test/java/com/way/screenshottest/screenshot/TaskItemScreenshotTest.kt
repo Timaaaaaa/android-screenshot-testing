@@ -1,3 +1,4 @@
+// Screenshot tests for TaskItem component
 package com.way.screenshottest.screenshot
 
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +28,6 @@ class TaskItemScreenshotTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    // Тест 1: Задача с высоким приоритетом — не выполнена
     @Test
     fun taskItem_highPriority_pending() {
         composeTestRule.setContent {

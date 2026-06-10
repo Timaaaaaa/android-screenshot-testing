@@ -63,6 +63,7 @@ fun DemoScreen(modifier: Modifier = Modifier) {
         )
 
         Text(
+            modifier= Modifier.padding(start = 12.dp),
             text = "Tasks",
             style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
         )

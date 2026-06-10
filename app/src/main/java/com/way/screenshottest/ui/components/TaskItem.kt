@@ -27,6 +27,7 @@ import com.way.screenshottest.ui.theme.PriorityHigh
 import com.way.screenshottest.ui.theme.PriorityLow
 import com.way.screenshottest.ui.theme.PriorityMedium
 import com.way.screenshottest.ui.theme.ScreenShotTestTheme
+import com.way.screenshottest.ui.theme.StatusOnline
 
 enum class Priority { High, Medium, Low }
 
@@ -44,7 +45,6 @@ fun TaskItem(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Row(
@@ -96,7 +96,7 @@ private fun PriorityBadge(priority: Priority) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = StatusOnline,
         )
     }
 }
